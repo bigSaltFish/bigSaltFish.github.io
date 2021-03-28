@@ -1,0 +1,158 @@
+---
+layout: default
+title: java如何给图片打水印？
+#excerpt: 我是摘要
+---
+<p>最近有个需求，在指定的半成品图片上，绘画数据。类似的效果是这样
+	<img src="{{site.url}}/assets/java_image_watermark/target.png" width="1000px"></p>
+	图片上的数据是从数据库中查出来的，也就是填充文字需要后端来实现。开始我也是很懵，经过指点，也晓得是要用java.awt包下的东西（汗颜，这个包下的东西，上次使用还是在参加工作之前。。。）<br><br>
+    我预估这个需求，貌似也不是很难，就是三步走，<br>
+      第一步：获取半成品图，转换成Image对象<br>
+      第二步：在内存，把文字绘画到Image对象中<br>
+      第三部：把绘画好的Image输出到磁盘（或者图片服务器）<br>
+听起来，还是很简单很清晰的，然而，在实际操作中，还是碰到了一些坑，比如，在第二步，绘画文字到图片，最开始我用的是Graphics对象，
+实现绘画的效果是没问题的，但是，绘画出的文字会有锯齿，效果不好，继而换为Graphics2D（听名字就知道是Graphics的升级版了，哈哈）。
+    到这里，锯齿问题解决了，还有一个问题没解决，就是字体问题，JDK也是提供了几个字体，我试过了，效果都不好，为了保持和效果图的一致性，
+	就不得不用效果图一样的字体了，也就是用本地字体。在这里，我不得不吐槽下Font.deriveFont()这个API的设计者了，这个方法的意思是得到一个xxx的字体，xxx就是你传入的参数来指定，可以填整形，我瞥了一眼API，大概就是字体的style的意思，然而，我无论填1还是100，那个字都是小的看不到，真是无语了，搞了半天，原来你要指定字体的大小，得传入浮点类型！
+	<br><br>为什么就不能是Font.setSize()方法来指定字体的大小呢？？<img src="{{site.url}}/assets/java_image_watermark/api2.png">
+	到这里，锯齿和样式的问题，处理好了，算是告一段落了。下面附上代码<br><br>
+	首先，我定义了一个实体，保存标题、所在地、车龄等信息，如下<br>
+	
+{% highlight ruby linenos %}
+class ImageGujia{  
+	private String title;//标题
+	private String city;//城市中文
+	private String carAge;//车龄
+	private String mileAge;//里程
+	private String gujia;//估价
+	private String guidancePrice;//新车指导价
+	  
+	// set/get方法省略  
+}
+{% endhighlight %}
+	
+	接下来呢，就是读取图片、打水印、输出图片了
+
+{% highlight ruby linenos %}
+public static String createGujiaImage(String inImagePath, String outImagePath, ImageGujia vo) {
+        int qualNum = 1;
+        ImageIcon imageIcon = new ImageIcon(inImagePath);
+        Image image = imageIcon.getImage();
+        int width = image.getWidth(null);
+        int height = image.getHeight(null);
+          
+        BufferedImage bImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = bImage.createGraphics();
+        g.setColor(Color.black);
+        g.setBackground(Color.white);
+        /* 画出图片 */
+        g.drawImage(image, 0, 0, null);
+          
+        /** 下面代码的参数都是根据UED的图片用尺子量的，不会产生魔数，请不要codeReview **/
+        Color color = new Color(51,51,51);//大标题颜色
+        addWord2image(g, vo.getTitle(), 30, 51, 1 ,28f,color);//标题
+        color = new Color(81,81,81);//行2文字的颜色
+        addWord2image(g, vo.getCity(), 100, 91, 2 , 20f,color);//城市
+        addWord2image(g, vo.getCarAge(), 220, 91, 2 , 20f,color);//车龄
+        addWord2image(g, vo.getMileAge(), 330, 91, 2 , 20f,color);//里程
+        color = new Color(253,96,63);//估价和估价单位的颜色
+        addWord2image(g, vo.getGujia(), 80, 213, 1 , 36f,color);//估价
+        addWord2image(g, PRICE_UNIT, 174, 213, 1 , 20f,color);//估价的单位
+        color = new Color(167,167,167);//指导价的颜色
+        addWord2image(g, vo.getGuidancePrice(), 347, 213, 2 , 20f,color);//指导价
+          
+        g.dispose();// 画笔结束
+          
+        FileOutputStream out = null;
+//      InputStream is = new InputStreamReader(in)
+        try {
+            out = new FileOutputStream(outImagePath);
+            JPEGImageEncoder encoder = JPEGCodec.createJPEGEncoder(out);
+            JPEGEncodeParam param = encoder.getDefaultJPEGEncodeParam(bImage);
+            param.setQuality(qualNum, true);
+            encoder.encode(bImage, param);
+        } catch (Exception e) {
+            LOGGER.error("createGujiaImage"+e.getMessage(),e);
+        }finally{
+            if(null != out){
+                try {
+                    out.close();
+                } catch (IOException e) {
+                    LOGGER.error("createGujiaImage  close out"+e.getMessage(),e);
+                }
+            }
+        }
+//      return uploadImage2TFS(outImagePath);
+        return null;
+    }
+  
+    /** 
+     * @Description:  把文字绘画到图片上
+     * @param g            Graphics2D 
+     * @param addWord      要加上去的文字 
+     * @param x            横坐标 
+     * @param y            纵坐标 
+     * @param fontType     字的类型，1/粗 2/匀称
+     * @param fontSize     字的size,28 
+     * @param color        字的颜色 
+     * void  
+     * @by: yan.zhang@2017年12月14日
+     */
+    public static void addWord2image(Graphics2D g,String addWord,int x,int y,int fontType,float fontSize,Color color){
+        AttributedString ats = new AttributedString(addWord);
+        Font font = getDefFont(fontType,fontSize);
+        g.setFont(font);
+        g.setColor(color);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        // font = g.getFont().deriveFont(30.0f);
+        ats.addAttribute(TextAttribute.FONT, font, 0, addWord.length());
+        AttributedCharacterIterator iter = ats.getIterator();
+        g.drawString(iter, x,  y);
+    }
+  
+    /** 
+     * @Description:根据参数类型，获取字体
+     * @param type  1/粗 2/匀称
+     * @param fontSize
+     * @return Font  
+     * @by: yan.zhang@2017年12月15日
+     */
+    public static Font getDefFont(int type,float fontSize){
+        InputStream is = null;
+        BufferedInputStream bis = null;
+        Font definedFont = null;
+        try {
+            if(1 == type){
+                is = ImageUtils.class.getResourceAsStream("/font/PingFang_Bold.ttf");
+            }else if(2 == type){
+                is = ImageUtils.class.getResourceAsStream("/font/PingFang_SC_Regular.otf");
+            }
+            bis = new BufferedInputStream(is);
+            
+            definedFont = Font.createFont(Font.TRUETYPE_FONT, bis);
+            definedFont = definedFont.deriveFont(fontSize);
+        } catch (Exception e) {
+            LOGGER.error("getDefFont catch error "+e.getMessage(),e);
+        }finally{
+            if(null != bis){
+                try {
+                    bis.close();
+                } catch (IOException e) {
+                    LOGGER.error("getDefFont close bis "+e.getMessage(),e);
+                }
+            }
+            if(null != is){
+                try {
+                    is.close();
+                } catch (IOException e) {
+                    LOGGER.error("getDefFont close is "+e.getMessage(),e);
+                }
+            }
+        }
+        return definedFont;
+    }
+	{% endhighlight %}
+	</div>
+	最后看下设计稿和程序生成的图片效果对比
+	<img src="{{site.url}}/assets/java_image_watermark/end.png" width="1000px">
+<div style="float:right">统计字数（{{ page.content | number_of_words }}）</div>
