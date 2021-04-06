@@ -27,5 +27,5 @@ Unable to start ServletWebServerApplicationContext due to missing ServletWebServ
 
 　　折腾了好一会，才解决，原来，是我的机器是新的，idea的配置没设置。我的idea版本是2020.2，需要设置 run/debug configurations 中application 勾选 include dependencies with provided scope(该选项默认是不勾选)
 
-!({{site.url}}/assets/2021-04-06-11-missing servlet_webserverfactory/idea_run_configurations.png)
+![示例]({{site.url}}/assets/2021-04-06-11-missing servlet_webserverfactory/idea_run_configurations.png)
 
